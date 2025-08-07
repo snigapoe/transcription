@@ -1,0 +1,17 @@
+# Python virtual environment
+venv/
+
+# Environment variables (contains secret API key)
+.env
+
+# Log files
+*.log
+
+# Python cache
+__pycache__/
+
+# OS-specific files
+.DS_Store
+
+
+
