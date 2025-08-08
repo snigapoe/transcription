@@ -16,7 +16,7 @@ genai.configure(api_key=API_KEY)
 
 # --- Folder Definitions ---
 INPUT_FOLDER = Path("audio_in")
-OUTPUT_FOLDER = Path("output")
+OUTPUT_FOLDER = Path("transcripts")
 
 # --- Model Definition ---
 # Using 2.5 Pro as it's the best for transcription

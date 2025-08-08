@@ -3,76 +3,127 @@ import subprocess
 from pathlib import Path
 
 # --- CONFIGURATION ---
-# Set the desired length of each video chunk in minutes.
-# You can change this value as needed.
+# Set the desired mode: 'audio', 'video', or 'both'.
+# 'audio': Extracts and splits only the audio into MP3 chunks.
+# 'video': Splits the video into smaller video chunks (no re-encoding).
+# 'both':  Performs both of the above actions.
+# NOTE: If an audio file is found as the source, this will automatically be treated as 'audio'.
+SPLIT_MODE = 'both'  # Options: 'audio', 'video', 'both'
+
+# Set the desired length of each chunk in minutes.
 CHUNK_DURATION_MINUTES = 50
 
-# Specify the folder where your large video file is located.
+# Specify the folder where your large media file (video or audio) is located.
 SOURCE_FOLDER = Path("video_to_split")
 
 # Specify the folder where the smaller video chunks will be saved.
-OUTPUT_FOLDER = Path("audio_in")
+OUTPUT_FOLDER_VIDEO = Path("video_out")
+
+# Specify the folder where the smaller audio chunks will be saved.
+OUTPUT_FOLDER_AUDIO = Path("audio_in")
 # --- END CONFIGURATION ---
 
 
-def split_video():
+def split_media():
     """
-    Finds the first video in the SOURCE_FOLDER and splits it into chunks
-    of a specified duration, saving them to the OUTPUT_FOLDER.
+    Finds the first video or audio file in the SOURCE_FOLDER and processes it.
+    - If a video file is found, it can split the video, audio, or both based on SPLIT_MODE.
+    - If an audio file is found, it will only split the audio into chunks.
     """
-    # Create necessary directories
+    # --- Initial Setup ---
     SOURCE_FOLDER.mkdir(exist_ok=True)
-    OUTPUT_FOLDER.mkdir(exist_ok=True)
-    
-    # Convert chunk duration from minutes to seconds for ffmpeg
-    chunk_duration_seconds = CHUNK_DURATION_MINUTES * 60
+    if SPLIT_MODE in ['video', 'both']:
+        OUTPUT_FOLDER_VIDEO.mkdir(exist_ok=True)
+    if SPLIT_MODE in ['audio', 'both']:
+        OUTPUT_FOLDER_AUDIO.mkdir(exist_ok=True)
 
-    # Find the first video file in the source folder
-    source_video_path = None
-    for file in SOURCE_FOLDER.iterdir():
-        # Add other video extensions if needed
-        if file.suffix.lower() in ['.mp4', '.mkv', '.mov', '.avi']:
-            source_video_path = file
-            break
-            
-    if not source_video_path:
-        print(f"No video file found in the '{SOURCE_FOLDER}' directory.")
-        print("Please add the large video you want to split into that folder and run again.")
+    if SPLIT_MODE not in ['audio', 'video', 'both']:
+        print(f"Error: Invalid SPLIT_MODE '{SPLIT_MODE}'. Please choose 'audio', 'video', or 'both'.")
         return
 
-    print(f"Found video file: '{source_video_path.name}'")
-    print(f"Splitting into chunks of {CHUNK_DURATION_MINUTES} minutes each...")
+    chunk_duration_seconds = CHUNK_DURATION_MINUTES * 60
 
-    # Define the output filename pattern
-    # Example: if source is 'my_long_video.mp4', chunks will be 'my_long_video_part_001.mp4', etc.
-    output_pattern = OUTPUT_FOLDER / f"{source_video_path.stem}_part_%03d{source_video_path.suffix}"
-
-    # Construct and run the ffmpeg command
-    # This command is highly efficient as it copies the video/audio streams without re-encoding
-    command = [
-        'ffmpeg',
-        '-i', str(source_video_path),  # Input file
-        '-c', 'copy',                 # Copy codecs to prevent re-encoding (fast)
-        '-map', '0',                  # Map all streams
-        '-segment_time', str(chunk_duration_seconds), # Duration of each chunk
-        '-f', 'segment',              # Use the segment muxer
-        '-reset_timestamps', '1',     # Reset timestamps for each chunk
-        str(output_pattern)           # Output file pattern
-    ]
+    # --- File Discovery ---
+    source_media_path = None
+    source_type = None  # Will be 'video' or 'audio'
     
-    try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
-        print("\nSuccessfully split the video!")
-        print(f"The smaller chunks have been saved to the '{OUTPUT_FOLDER}' directory.")
-        print("You can now run your transcription script daily on one of these chunks.")
-    except subprocess.CalledProcessError as e:
-        print("\nAn error occurred while running ffmpeg.")
-        print("Please ensure ffmpeg is installed correctly.")
-        print(f"Error details:\n{e.stderr}")
-    except FileNotFoundError:
-        print("\nError: 'ffmpeg' command not found.")
-        print("Please make sure ffmpeg is installed on your system and accessible in your PATH.")
+    video_extensions = ['.mp4', '.mkv', '.mov', '.avi', '.flv', '.webm']
+    audio_extensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac']
+
+    print(f"Searching for media files in '{SOURCE_FOLDER}'...")
+    for file in SOURCE_FOLDER.iterdir():
+        file_ext = file.suffix.lower()
+        if file_ext in video_extensions:
+            source_media_path = file
+            source_type = 'video'
+            break
+        elif file_ext in audio_extensions:
+            source_media_path = file
+            source_type = 'audio'
+            break
+            
+    if not source_media_path:
+        print(f"No supported video or audio file found in the '{SOURCE_FOLDER}' directory.")
+        print(f"Please add a media file ({', '.join(video_extensions)} or {', '.join(audio_extensions)}) to process.")
+        return
+
+    print(f"Found {source_type} file: '{source_media_path.name}'")
+
+    # --- Mode Validation based on Source Type ---
+    effective_mode = SPLIT_MODE
+    if source_type == 'audio':
+        if SPLIT_MODE == 'video':
+            print("\nError: Cannot perform 'video' split on an audio file.")
+            print("Please change SPLIT_MODE to 'audio'.")
+            return
+        # If input is audio, we can only perform audio splitting.
+        effective_mode = 'audio' 
+        print(f"Input is an audio file. Mode will be treated as 'audio'.")
+
+    print(f"Effective mode: '{effective_mode}'")
+    print(f"Processing into chunks of {CHUNK_DURATION_MINUTES} minutes each...")
+
+    # --- Task Execution ---
+    # Task 1: Split video (only if source is video and mode is video/both)
+    if source_type == 'video' and effective_mode in ['video', 'both']:
+        print("\nStarting video splitting task...")
+        output_pattern_video = OUTPUT_FOLDER_VIDEO / f"{source_media_path.stem}_part_%03d{source_media_path.suffix}"
+        command_video = [
+            'ffmpeg', '-i', str(source_media_path), '-c', 'copy', '-map', '0',
+            '-segment_time', str(chunk_duration_seconds), '-f', 'segment',
+            '-reset_timestamps', '1', str(output_pattern_video)
+        ]
+        try:
+            subprocess.run(command_video, check=True, capture_output=True, text=True)
+            print("-> Successfully split the video!")
+            print(f"   Video chunks saved to '{OUTPUT_FOLDER_VIDEO}'")
+        except subprocess.CalledProcessError as e:
+            print("-> An error occurred while splitting the video.")
+            print(f"   FFmpeg Error Output:\n{e.stderr}")
+        except FileNotFoundError:
+            print("-> Error: 'ffmpeg' command not found. Please ensure it's installed and in your PATH.")
+
+    # Task 2: Split audio (if mode is audio/both)
+    if effective_mode in ['audio', 'both']:
+        print("\nStarting audio splitting task...")
+        output_pattern_audio = OUTPUT_FOLDER_AUDIO / f"{source_media_path.stem}_part_%03d.mp3"
+        command_audio = [
+            'ffmpeg', '-i', str(source_media_path), '-vn', '-c:a', 'libmp3lame',
+            '-b:a', '192k', '-map', '0:a', '-segment_time', str(chunk_duration_seconds),
+            '-f', 'segment', '-reset_timestamps', '1', str(output_pattern_audio)
+        ]
+        try:
+            subprocess.run(command_audio, check=True, capture_output=True, text=True)
+            print("-> Successfully split the audio!")
+            print(f"   Audio chunks saved to '{OUTPUT_FOLDER_AUDIO}'")
+        except subprocess.CalledProcessError as e:
+            print("-> An error occurred while splitting the audio.")
+            print(f"   FFmpeg Error Output:\n{e.stderr}")
+        except FileNotFoundError:
+            print("-> Error: 'ffmpeg' command not found. Please ensure it's installed and in your PATH.")
+    
+    print("\nProcessing complete.")
 
 
 if __name__ == "__main__":
-    split_video()
+    split_media()
